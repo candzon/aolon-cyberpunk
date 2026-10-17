@@ -28,27 +28,51 @@ Deleting anything is a soft delete with an Undo button, so a mis-tap never loses
 - 220 minus age is an estimate. Your real max heart rate can be off by 10 bpm or more, so treat the zones as a guide.
 - Emoji are removed from notifications before sending. The watch cannot draw them.
 
-## Building it
+## Self-hosting
 
-You need Android Studio (or just the JDK 17+ and the Android SDK), a phone on Android 8.0 or newer, and your own Firebase project.
+There is no shared server. Every install runs against a Firebase project you own, so your data sits in your account and nobody else's. The repo does not include a Firebase config, and the build fails until you add yours.
 
-1. Create a Firebase project with Realtime Database and Google sign-in turned on.
-2. Add an Android app with the package name `com.feri.aolon_cyberpunk` and register the SHA-1 of the key you sign with. For a debug build that is the one from `~/.android/debug.keystore`.
-3. Download `google-services.json` into `app/`. The one in this repo points at my project, so replace it.
-4. Build and install:
+You need Android Studio (or JDK 17+ and the Android SDK) and a phone on Android 8.0 or newer.
 
-```
-./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
+1. Create a Firebase project and turn on Realtime Database and the Google sign-in provider. Google sign-in also creates the web client ID the app uses to log you in.
+2. Add an Android app with the package name `com.feri.aolon_cyberpunk`, then add the SHA-1 of the key you sign with. For a debug build, get it with:
 
-The release build is signed with the debug key on purpose, because that is the key registered for Google sign-in in my Firebase project. If you plan to publish, create a proper release keystore and register its SHA-1 too.
+   ```
+   keytool -list -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey
+   ```
+
+3. Download `google-services.json` from the Firebase console and put it in `app/`. Git ignores it, so it stays on your machine.
+4. In Realtime Database, set the rules so each account can only touch its own data:
+
+   ```json
+   {
+     "rules": {
+       "aolon": {
+         "users": {
+           "$uid": {
+             ".read": "$uid === auth.uid",
+             ".write": "$uid === auth.uid"
+           }
+         }
+       }
+     }
+   }
+   ```
+
+5. Build and install:
+
+   ```
+   ./gradlew assembleDebug
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+   ```
+
+The release build is signed with the debug key on purpose, so the SHA-1 from step 2 covers both builds. If you want to publish it somewhere, make a real release keystore and add its SHA-1 to Firebase as well.
 
 Run the unit tests with `./gradlew testDebugUnitTest`. They cover the parts that are easy to get wrong: body fat maths, gym records, the Lyfta import, GPS track filtering and splits, heart rate zones, and the watch message packets.
 
 ## Where the data lives
 
-Everything you record goes to Firebase Realtime Database under `aolon/users/{your uid}`, so only your Google account can read it (with the usual per-user security rules). GPS routes are stored apart from the activity list so the history screen stays light.
+Everything you record goes to your own Firebase Realtime Database under `aolon/users/{your uid}`. With the rules above, only your Google account can read or write it. GPS routes are stored apart from the activity list so the history screen stays light.
 
 A few things never leave the phone: the Lyfta sign-in tokens, the list of apps allowed to notify the watch, and the content of the notifications themselves. The in-app Bluetooth log also hides message text and shows only the packet header and length.
 

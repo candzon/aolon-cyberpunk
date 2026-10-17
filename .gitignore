@@ -15,3 +15,6 @@ captures/
 .agents/
 CLAUDE.md
 AGENTS.md
+
+# Each self-hosted install brings its own Firebase project.
+app/google-services.json
