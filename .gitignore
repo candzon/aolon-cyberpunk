@@ -1,0 +1,17 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+*.apk
+*.aab
+*.jks
+*.keystore
+captures/
+
+# AI assistant and agent files stay local.
+.claude/
+.agents/
+CLAUDE.md
+AGENTS.md
