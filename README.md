@@ -4,6 +4,14 @@ My own Android app for the Aolon smartwatch. The official app works, but I wante
 
 It talks to the watch directly over Bluetooth. The watch uses the UTE protocol (the same family as GloryFit), and every command in `ble/WatchProtocol.kt` was worked out from how the official app talks to the watch, then checked against real packets from my own watch.
 
+<p align="center">
+  <img src="docs/screenshots/health.png" width="18%" alt="Health: today's steps and on-demand heart rate and blood oxygen">
+  <img src="docs/screenshots/gym.png" width="18%" alt="Gym: start a workout, routines and workout history">
+  <img src="docs/screenshots/cardio.png" width="18%" alt="Cardio: pick an activity and a target heart rate zone">
+  <img src="docs/screenshots/body.png" width="18%" alt="Body: U.S. Navy body fat calculator and history">
+  <img src="docs/screenshots/device.png" width="18%" alt="Device: choose which notifications reach the watch">
+</p>
+
 ## What it does
 
 Health shows steps by hour, heart rate and SpO2 measured on demand, and syncs the watch clock. My watch has no blood pressure sensor, so that row disappears whenever the watch reports it has none.
