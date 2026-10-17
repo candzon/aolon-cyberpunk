@@ -28,47 +28,49 @@ Deleting anything is a soft delete with an Undo button, so a mis-tap never loses
 - 220 minus age is an estimate. Your real max heart rate can be off by 10 bpm or more, so treat the zones as a guide.
 - Emoji are removed from notifications before sending. The watch cannot draw them.
 
-## Self-hosting
+## Setting it up yourself
 
-There is no shared server. Every install runs against a Firebase project you own, so your data sits in your account and nobody else's. The repo does not include a Firebase config, and the build fails until you add yours.
+There is no shared server behind this app. You run it against your own Firebase project, which means your health data ends up in your account and nowhere else. The catch is that the repo ships without a Firebase config, so the build will fail until you add one.
 
-You need Android Studio (or JDK 17+ and the Android SDK) and a phone on Android 8.0 or newer.
+You'll need Android Studio (or JDK 17+ with the Android SDK if you prefer the command line) and a phone running Android 8.0 or newer.
 
-1. Create a Firebase project and turn on Realtime Database and the Google sign-in provider. Google sign-in also creates the web client ID the app uses to log you in.
-2. Add an Android app with the package name `com.feri.aolon_cyberpunk`, then add the SHA-1 of the key you sign with. For a debug build, get it with:
+Start in the [Firebase console](https://console.firebase.google.com). Make a new project, then turn on two things: Realtime Database, and Google under Authentication > Sign-in method. Don't skip the second one. Enabling Google sign-in is what creates the web client ID the app logs in with.
 
-   ```
-   keytool -list -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey
-   ```
+Next, add an Android app to the project. Use `com.feri.aolon_cyberpunk` as the package name, and paste in the SHA-1 of the key you build with. Firebase uses it to decide which builds are allowed to sign in, and if it's missing or wrong, Google sign-in simply won't work. For a normal debug build you can print it with:
 
-3. Download `google-services.json` from the Firebase console and put it in `app/`. Git ignores it, so it stays on your machine.
-4. In Realtime Database, set the rules so each account can only touch its own data:
+```
+keytool -list -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey
+```
 
-   ```json
-   {
-     "rules": {
-       "aolon": {
-         "users": {
-           "$uid": {
-             ".read": "$uid === auth.uid",
-             ".write": "$uid === auth.uid"
-           }
-         }
-       }
-     }
-   }
-   ```
+Firebase then offers you a `google-services.json`. Drop it into the `app/` folder. It's in `.gitignore`, so you won't commit it by accident.
 
-5. Build and install:
+Before you record anything, open Realtime Database > Rules and replace the defaults with these, so every account can only see its own data:
 
-   ```
-   ./gradlew assembleDebug
-   adb install -r app/build/outputs/apk/debug/app-debug.apk
-   ```
+```json
+{
+  "rules": {
+    "aolon": {
+      "users": {
+        "$uid": {
+          ".read": "$uid === auth.uid",
+          ".write": "$uid === auth.uid"
+        }
+      }
+    }
+  }
+}
+```
 
-The release build is signed with the debug key on purpose, so the SHA-1 from step 2 covers both builds. If you want to publish it somewhere, make a real release keystore and add its SHA-1 to Firebase as well.
+Now build it and put it on your phone:
 
-Run the unit tests with `./gradlew testDebugUnitTest`. They cover the parts that are easy to get wrong: body fat maths, gym records, the Lyfta import, GPS track filtering and splits, heart rate zones, and the watch message packets.
+```
+./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+The release build is signed with the debug key too. I did that on purpose so the one SHA-1 you registered works for both. If you ever want to publish the app, create a real release keystore and add its SHA-1 to Firebase as well.
+
+To run the tests, use `./gradlew testDebugUnitTest`. They focus on the parts that are easiest to get wrong: body fat maths, gym records, the Lyfta import, GPS filtering and splits, heart rate zones, and the packets sent to the watch.
 
 ## Where the data lives
 
