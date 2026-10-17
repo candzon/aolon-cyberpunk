@@ -72,6 +72,18 @@ The release build is signed with the debug key too. I did that on purpose so the
 
 To run the tests, use `./gradlew testDebugUnitTest`. They focus on the parts that are easiest to get wrong: body fat maths, gym records, the Lyfta import, GPS filtering and splits, heart rate zones, and the packets sent to the watch.
 
+## Connecting Lyfta (optional)
+
+If you already log your lifts in Lyfta, the app can pull them in so your old workouts show up next to the new ones. You don't need this to use the gym log, and you don't need a Lyfta developer account or an API key either. The first time you connect, the app registers itself with Lyfta as "Aolon Cyberpunk", so every install gets its own client and there is nothing to paste in.
+
+To connect, open Sport > Gym, scroll down to Settings and tap Connect Lyfta. Your browser opens the Lyfta sign-in page. Log in with the account you train with, approve the access, and Lyfta sends you straight back to the app. The app only asks for read access to your training, so it can't change or delete anything in Lyfta.
+
+After that it imports your latest 20 workouts and syncs again each time you open the app. There's also a Sync button if you don't want to wait. Running the import twice won't create duplicates. Exercises are matched to the built-in library by name, and anything it doesn't recognise becomes a custom exercise under Other. Lyfta doesn't send a workout duration, so imported sessions show sets and volume without a time.
+
+The Lyfta login stays on your phone. It never goes to Firebase. Disconnect Lyfta signs you out and keeps the workouts you already imported.
+
+One thing if you fork the project: Lyfta sends you back to the app through the address `aoloncyberpunk://lyfta/callback`. If you rename the app and change that address, change it in both `lyfta/LyftaClient.kt` (`REDIRECT`) and the intent filter in `AndroidManifest.xml`, or the browser won't know where to return you.
+
 ## Where the data lives
 
 Everything you record goes to your own Firebase Realtime Database under `aolon/users/{your uid}`. With the rules above, only your Google account can read or write it. GPS routes are stored apart from the activity list so the history screen stays light.
