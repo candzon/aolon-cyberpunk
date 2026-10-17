@@ -93,3 +93,7 @@ app/src/main/java/com/feri/aolon_cyberpunk/
 ## Credits
 
 Maps from OpenStreetMap contributors, drawn with osmdroid. Gym import uses the Lyfta API. This is a personal project and is not affiliated with Aolon, UTE or Lyfta.
+
+## License
+
+MIT. See [LICENSE](LICENSE). The licence covers the code in this repo, not the Aolon, UTE or Lyfta names, and not their apps.
