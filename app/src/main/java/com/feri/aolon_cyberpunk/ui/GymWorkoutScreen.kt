@@ -6,10 +6,13 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,6 +41,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -47,7 +52,9 @@ import com.feri.aolon_cyberpunk.AolonViewModel
 import com.feri.aolon_cyberpunk.formatDuration
 import com.feri.aolon_cyberpunk.gym.GymSet
 import com.feri.aolon_cyberpunk.gym.GymWorkout
+import com.feri.aolon_cyberpunk.gym.SetType
 import com.feri.aolon_cyberpunk.gym.kgText
+import com.feri.aolon_cyberpunk.gym.newRecords
 import com.feri.aolon_cyberpunk.gym.previousSets
 import com.feri.aolon_cyberpunk.gym.volume
 import kotlinx.coroutines.delay
@@ -79,7 +86,9 @@ fun GymWorkoutScreen(vm: AolonViewModel, workout: GymWorkout, notify: (String) -
                 val done = gym.finish()
                 if (done == null) notify("Tick at least one set with reps before finishing.")
                 else {
-                    notify("${done.name} saved: ${done.doneSets} sets, ${kgText(volume(done))} kg.")
+                    val prs = newRecords(gym.history - done, done).map { gym.exercise(it).name }
+                    notify("${done.name} saved: ${done.doneSets} sets, ${kgText(volume(done))} kg." +
+                        if (prs.isEmpty()) "" else " New record: ${prs.joinToString(", ")}.")
                     onBack()
                 }
             }) { Text("Finish", color = Neon.Purple, fontWeight = FontWeight.SemiBold) }
@@ -93,6 +102,9 @@ fun GymWorkoutScreen(vm: AolonViewModel, workout: GymWorkout, notify: (String) -
                 Figure("Volume", "${kgText(volume(workout))} kg", Modifier.weight(1f))
             }
         }
+        if (workout.entries.isNotEmpty()) item {
+            Text("Tap a set number to mark it W warm-up, D drop set or F failure.", color = Neon.Soft, style = MaterialTheme.typography.bodySmall)
+        }
         if (workout.entries.isEmpty()) item { StateMessage("No exercises yet. Add one to start logging sets.") }
         workout.entries.forEachIndexed { ei, entry ->
             item(key = "$ei-${entry.exerciseId}") {
@@ -102,7 +114,7 @@ fun GymWorkoutScreen(vm: AolonViewModel, workout: GymWorkout, notify: (String) -
                     SetHeader()
                     entry.sets.forEachIndexed { si, set ->
                         key(si) {
-                            SetRow(si + 1, previous.getOrNull(si), set, { gym.updateSet(ei, si, it) }) {
+                            SetRow(si + 1, previous.getOrNull(si), set, { gym.updateSet(ei, si, it) }, { gym.cycleType(ei, si) }) {
                                 if (!set.done && set.reps <= 0) notify("Enter reps first.")
                                 else gym.toggleDone(ei, si, vm.settings.restSeconds)
                             }
@@ -152,9 +164,27 @@ private fun SetHeader() {
 }
 
 @Composable
-private fun SetRow(number: Int, previous: GymSet?, set: GymSet, onChange: (GymSet) -> Unit, onToggle: () -> Unit) {
+private fun SetRow(number: Int, previous: GymSet?, set: GymSet, onChange: (GymSet) -> Unit, onCycleType: () -> Unit, onToggle: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("$number", Modifier.weight(0.45f), style = Telemetry, textAlign = TextAlign.Center, color = if (set.done) Neon.Purple else Neon.White)
+        Box(
+            Modifier
+                .weight(0.45f)
+                .heightIn(min = 48.dp)
+                .clickable(onClickLabel = "Change set type", onClick = onCycleType)
+                .semantics { contentDescription = "Set $number, ${set.type.label}" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                set.type.letter.ifEmpty { "$number" },
+                style = Telemetry,
+                color = when {
+                    set.type == SetType.Failure -> Neon.Red
+                    set.type != SetType.Normal -> Neon.Blue
+                    set.done -> Neon.Purple
+                    else -> Neon.White
+                },
+            )
+        }
         Text(
             previous?.let { "${kgText(it.kg)} × ${it.reps}" } ?: "–",
             Modifier.weight(1.1f),

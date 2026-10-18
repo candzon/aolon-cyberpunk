@@ -71,11 +71,21 @@ data class AppSettings(
     val targetZone: Int? = null,
 )
 
-data class Profile(val male: Boolean = true, val age: Int? = null, val heightCm: Double? = null, val weightKg: Double? = null) {
+data class Profile(
+    val male: Boolean = true,
+    val age: Int? = null,
+    val heightCm: Double? = null,
+    val weightKg: Double? = null,
+    val activity: Activity = Activity.Low,
+    val goal: WeightGoal = WeightGoal.Maintain,
+    val goalWeightKg: Double? = null,
+) {
     val complete get() = age != null && heightCm != null && weightKg != null
+    val rdi get() = if (complete) Diet.rdi(male, age!!, heightCm!!, weightKg!!, activity, goal) else null
 }
-data class BodyLog(val id: String, val at: Long, val weightKg: Double, val bodyFat: Double, val bmiMethod: Double)
-data class Food(val id: String, val date: LocalDate, val name: String, val kcal: Int)
+/** A weigh-in; body fat fields are null when the weight was logged without the calculator. */
+data class BodyLog(val id: String, val at: Long, val weightKg: Double, val bodyFat: Double?, val bmiMethod: Double?)
+data class Food(val id: String, val date: LocalDate, val name: String, val kcal: Int, val meal: Meal = Meal.Snacks, val macros: Macros? = null)
 
 /** Daily energy estimate; every part is a formula, not a measurement. */
 class Burn(val resting: Int, val steps: Int, val workouts: Int) {
@@ -160,6 +170,15 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
     private var syncTimeout: Job? = null
 
     fun stepsOn(date: LocalDate) = steps[date]?.values?.sum() ?: 0
+
+    /** Nights by the morning they ended. */
+    val sleep = mutableStateMapOf<LocalDate, SleepNight>()
+    /** From the feature bitmap; false means the watch has no 31 01 sleep sync. */
+    var hasSleep by mutableStateOf<Boolean?>(null)
+        private set
+    private var cyweeSleep = false
+    private val sleepParts = SleepAssembler()
+    private var sleepPending = false
     val stepsToday get() = stepsOn(LocalDate.now())
 
     private val messages = MessagePusher { watch.send(it) }
@@ -275,6 +294,7 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
         plans.clear()
         alarms.clear()
         steps.clear()
+        sleep.clear()
         bodyLogs.clear()
         food.clear()
         profile = Profile()
@@ -309,6 +329,7 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
         plans.clear()
         alarms.clear()
         steps.clear()
+        sleep.clear()
         bodyLogs.clear()
         food.clear()
         sessions += data.child("sessions").entries { s ->
@@ -326,11 +347,16 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
         }
         alarms += data.child("alarms").entries { a -> Alarm(a.key!!, a.str("label")!!, a.str("time")!!) }.sortedBy { it.time }
         bodyLogs += data.child("bodyLogs").entries { b ->
-            BodyLog(b.key!!, b.long("at")!!, b.num("weightKg")!!, b.num("bodyFat")!!, b.num("bmiMethod")!!)
+            BodyLog(b.key!!, b.long("at")!!, b.num("weightKg")!!, b.num("bodyFat"), b.num("bmiMethod"))
         }.sortedBy { it.at }
         data.child("food").children.forEach { day ->
             val date = runCatching { LocalDate.parse(day.key) }.getOrNull() ?: return@forEach
-            food += day.entries { f -> Food(f.key!!, date, f.str("name")!!, f.long("kcal")!!.toInt()) }
+            food += day.entries { f ->
+                // Entries from before meals and macros existed land in Snacks/Other with no macros.
+                val macros = if (f.hasChild("protein") || f.hasChild("carbs") || f.hasChild("fat"))
+                    Macros(f.num("protein") ?: 0.0, f.num("carbs") ?: 0.0, f.num("fat") ?: 0.0) else null
+                Food(f.key!!, date, f.str("name")!!, f.long("kcal")!!.toInt(), Meal.entries.firstOrNull { it.name == f.str("meal") } ?: Meal.Snacks, macros)
+            }
         }
         val pr = data.child("profile")
         profile = Profile(
@@ -338,6 +364,9 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
             age = pr.long("age")?.toInt(),
             heightCm = pr.num("heightCm"),
             weightKg = pr.num("weightKg"),
+            activity = Activity.entries.firstOrNull { it.name == pr.str("activity") } ?: Activity.Low,
+            goal = WeightGoal.entries.firstOrNull { it.name == pr.str("goal") } ?: WeightGoal.Maintain,
+            goalWeightKg = pr.num("goalWeightKg"),
         )
         val s = data.child("settings")
         settings = AppSettings(
@@ -350,6 +379,11 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
         data.child("steps").children.forEach { day ->
             val date = runCatching { LocalDate.parse(day.key) }.getOrNull() ?: return@forEach
             steps[date] = day.children.associate { it.key!!.removePrefix("h").toInt() to (it.getValue(Long::class.java) ?: 0L).toInt() }
+        }
+        data.child("sleep").children.forEach { night ->
+            val date = runCatching { LocalDate.parse(night.key) }.getOrNull() ?: return@forEach
+            val segments = Sleep.decode(night.getValue(String::class.java) ?: return@forEach)
+            if (segments.isNotEmpty()) sleep[date] = SleepNight(date, segments)
         }
         gym.load(data)
         savedWatch = data.child("watch").str("address")?.let { FoundWatch(it, data.child("watch").str("name") ?: it, 0, true) }
@@ -411,14 +445,46 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
         syncSteps()
     }
 
+    // Sleep follows steps: the watch streams one history at a time and the SDK never overlaps them.
     fun syncSteps() {
         syncing = true
+        sleepPending = true
         watch.send(Ute.syncSteps())
+        stepsQuiet()
+    }
+
+    // Older firmware never sends an end marker, so move on once the hours stop arriving.
+    private fun stepsQuiet() {
         syncTimeout?.cancel()
-        // Older firmware never sends an end marker, so stop the spinner after a quiet period.
+        syncTimeout = viewModelScope.launch {
+            delay(8_000)
+            syncSleep()
+        }
+    }
+
+    private fun syncSleep() {
+        syncTimeout?.cancel()
+        if (!sleepPending || (hasSleep == false && !cyweeSleep)) {
+            sleepPending = false
+            syncing = false
+            return
+        }
+        sleepPending = false
+        sleepParts.finish()
+        watch.send(Ute.syncSleep(cyweeSleep))
         syncTimeout = viewModelScope.launch {
             delay(15_000)
             syncing = false
+        }
+    }
+
+    private fun saveNights(nights: List<SleepNight>) {
+        nights.forEach { night ->
+            // Every sync replays the stored nights; unchanged ones cost no write.
+            if (sleep[night.date] != night) {
+                sleep[night.date] = night
+                write("sleep/${night.date}", Sleep.encode(night.segments))
+            }
         }
     }
 
@@ -453,8 +519,16 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
         when (event) {
             is WatchEvent.Battery -> battery = event
             is WatchEvent.Firmware -> firmware = event.version
-            is WatchEvent.Features -> hasBloodPressure = event.bloodPressure
+            is WatchEvent.Features -> {
+                hasBloodPressure = event.bloodPressure
+                hasSleep = event.sleep || cyweeSleep
+            }
+            is WatchEvent.MoreFeatures -> {
+                cyweeSleep = event.cyweeSleep
+                if (cyweeSleep) hasSleep = true
+            }
             is WatchEvent.StepHour -> {
+                if (sleepPending) stepsQuiet()
                 val day = steps[event.date] ?: emptyMap()
                 // A sync replays every stored hour; only changed hours cost a write.
                 if (day[event.hour] != event.steps) {
@@ -463,9 +537,13 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
                     write("steps/${event.date}/h%02d".format(event.hour), event.steps)
                 }
             }
-            WatchEvent.StepSyncDone -> {
+            WatchEvent.StepSyncDone -> syncSleep()
+            is WatchEvent.SleepNight -> sleepParts.start(event.date)
+            is WatchEvent.SleepData -> sleepParts.data(event.bytes)
+            WatchEvent.SleepSyncDone -> {
                 syncTimeout?.cancel()
                 syncing = false
+                saveNights(sleepParts.finish())
             }
             is WatchEvent.Measuring -> {
                 acknowledged(event.metric)
@@ -601,7 +679,18 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
 
     fun updateProfile(next: Profile) {
         profile = next
-        write("profile", mapOf("male" to next.male, "age" to next.age, "heightCm" to next.heightCm, "weightKg" to next.weightKg))
+        write("profile", mapOf(
+            "male" to next.male, "age" to next.age, "heightCm" to next.heightCm, "weightKg" to next.weightKg,
+            "activity" to next.activity.name, "goal" to next.goal.name, "goalWeightKg" to next.goalWeightKg,
+        ))
+    }
+
+    /** Logs weight alone and makes it the current weight, so the calorie target follows it. */
+    fun weighIn(weightKg: Double) {
+        val log = BodyLog(newKey("bodyLogs"), System.currentTimeMillis(), weightKg, null, null)
+        bodyLogs += log
+        write("bodyLogs/${log.id}", mapOf("at" to log.at, "weightKg" to weightKg))
+        updateProfile(profile.copy(weightKg = weightKg))
     }
 
     fun saveBodyLog(weightKg: Double, result: BodyFat.Result) {
@@ -614,11 +703,30 @@ class AolonViewModel(app: Application) : AndroidViewModel(app), RecordStore {
         deleteWithUndo(bodyLogs, log, "bodyLogs/${log.id}", "Measurement deleted.")
     }
 
-    fun addFood(date: LocalDate, name: String, kcal: Int) {
-        val item = Food(newKey("food"), date, name, kcal)
+    fun addFood(date: LocalDate, meal: Meal, name: String, kcal: Int, macros: Macros?) {
+        val item = Food(newKey("food"), date, name, kcal, meal, macros)
         food += item
-        write("food/$date/${item.id}", mapOf("name" to name, "kcal" to kcal))
+        writeFood(item)
     }
+
+    /** Replaces an entry in place; the date stays, so the Firebase path is unchanged. */
+    fun updateFood(item: Food) {
+        val index = food.indexOfFirst { it.id == item.id }
+        if (index < 0) return
+        food[index] = item
+        writeFood(item)
+    }
+
+    private fun writeFood(item: Food) = write("food/${item.date}/${item.id}", buildMap {
+        put("name", item.name)
+        put("kcal", item.kcal)
+        put("meal", item.meal.name)
+        item.macros?.let { put("protein", it.protein); put("carbs", it.carbs); put("fat", it.fat) }
+    })
+
+    /** Distinct foods by name, most recently eaten first, for one-tap logging. */
+    fun recentFoods(limit: Int = 8): List<Food> =
+        food.sortedWith(compareByDescending<Food> { it.date }.thenByDescending { it.id }).distinctBy { it.name.lowercase() }.take(limit)
 
     fun removeFood(item: Food) {
         deleteWithUndo(food, item, "food/${item.date}/${item.id}", "${item.name} deleted.")

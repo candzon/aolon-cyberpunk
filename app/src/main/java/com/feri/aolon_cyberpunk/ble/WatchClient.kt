@@ -57,7 +57,7 @@ class WatchClient(context: Context) {
     private sealed interface Op {
         class Write(val char: UUID, val data: ByteArray) : Op
         class Notify(val service: UUID, val char: UUID) : Op
-        class Read(val char: UUID) : Op
+        class Read(val service: UUID, val char: UUID) : Op
     }
 
     private val queue = ArrayDeque<Op>()
@@ -173,7 +173,8 @@ class WatchClient(context: Context) {
                 enqueue(Op.Notify(Ute.BULK_SERVICE, Ute.BULK_NOTIFY))
             }
             // Reading 33f1 returns the feature bitmap the official app uses to hide unsupported sensors.
-            enqueue(Op.Read(Ute.WRITE))
+            enqueue(Op.Read(Ute.SERVICE, Ute.WRITE))
+            if (g.getService(Ute.BULK_SERVICE)?.getCharacteristic(Ute.BULK_WRITE) != null) enqueue(Op.Read(Ute.BULK_SERVICE, Ute.BULK_WRITE))
             main.post(::whenQueueIdle)
         }.let { }
 
@@ -187,7 +188,7 @@ class WatchClient(context: Context) {
 
         override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
             val copy = value.copyOf()
-            main.post { featuresRead(status, copy) }
+            main.post { featuresRead(c.uuid, status, copy) }
         }
 
         @Deprecated("Pre-Tiramisu callback")
@@ -195,7 +196,7 @@ class WatchClient(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                 @Suppress("DEPRECATION")
                 val copy = c.value?.copyOf() ?: ByteArray(0)
-                main.post { featuresRead(status, copy) }
+                main.post { featuresRead(c.uuid, status, copy) }
             }
         }
 
@@ -225,10 +226,10 @@ class WatchClient(context: Context) {
         }
     }
 
-    private fun featuresRead(status: Int, value: ByteArray) {
+    private fun featuresRead(char: UUID, status: Int, value: ByteArray) {
         if (status == BluetoothGatt.GATT_SUCCESS) {
-            note("FEATURES ${Ute.hex(value)}")
-            Ute.features(value)?.let { _events.tryEmit(it) }
+            note("FEATURES ${if (char == Ute.BULK_WRITE) "34f1" else "33f1"} ${Ute.hex(value)}")
+            (if (char == Ute.BULK_WRITE) Ute.moreFeatures(value) else Ute.features(value))?.let { _events.tryEmit(it) }
         }
         finishOp(if (status == BluetoothGatt.GATT_SUCCESS) null else "read status $status")
     }
@@ -259,7 +260,7 @@ class WatchClient(context: Context) {
                 else writeDescriptor(g, d, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
             }
             is Op.Read -> {
-                val c = g.getService(Ute.SERVICE)?.getCharacteristic(op.char)
+                val c = g.getService(op.service)?.getCharacteristic(op.char)
                 c != null && c.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0 && g.readCharacteristic(c)
             }
             is Op.Write -> {

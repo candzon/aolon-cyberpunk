@@ -36,6 +36,7 @@ import com.feri.aolon_cyberpunk.gym.GymWorkout
 import com.feri.aolon_cyberpunk.gym.Routine
 import com.feri.aolon_cyberpunk.gym.kgText
 import com.feri.aolon_cyberpunk.gym.records
+import com.feri.aolon_cyberpunk.gym.recovery
 import com.feri.aolon_cyberpunk.gym.volume
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -73,6 +74,8 @@ fun GymHome(vm: AolonViewModel, notify: (String) -> Unit, openWorkout: () -> Uni
         } else {
             PrimaryButton("Start empty workout", { begin(gym::startEmpty) }, Modifier.fillMaxWidth())
         }
+
+        if (gym.history.isNotEmpty()) RecoveryCard(vm)
 
         SectionCard("Routines") {
             if (gym.routines.isEmpty()) Text("Save exercises you repeat, then start them with one tap.", color = Neon.Muted)
@@ -120,6 +123,21 @@ fun GymHome(vm: AolonViewModel, notify: (String) -> Unit, openWorkout: () -> Uni
     progress?.let { id -> RecordDialog(vm, id) { progress = null } }
 }
 
+// Sits above routines because "what can I train today" decides which routine to start.
+@Composable
+private fun RecoveryCard(vm: AolonViewModel) {
+    val percent = recovery(vm.gym.history, { vm.gym.exercise(it).muscle })
+    SectionCard("Muscle recovery", trailing = "Last 7 days") {
+        if (percent.values.all { it == 100 }) Text("No sets in the last 7 days, so every muscle reads fully recovered.", color = Neon.Muted)
+        else percent.entries.chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { (muscle, p) -> Figure(muscle, "$p%", Modifier.weight(1f)) }
+            }
+        }
+        Text("Estimated from your logged sets. Warm-ups don't count, and sleep or soreness isn't known.", color = Neon.Soft, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
 @Composable
 private fun ShowAll(expanded: Boolean, total: Int, toggle: () -> Unit) {
     TextButton(toggle) { Text(if (expanded) "Show less" else "Show all $total", color = Neon.Blue) }
@@ -165,7 +183,10 @@ private fun WorkoutDialog(vm: AolonViewModel, w: GymWorkout, close: () -> Unit, 
                         Text(gym.exercise(e.exerciseId).name, color = Neon.White, style = MaterialTheme.typography.titleSmall)
                         // softWrap off keeps "13.5 × 12" on one line; FlowRow wraps whole sets instead.
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            e.sets.forEach { Text("${kgText(it.kg)} × ${it.reps}", style = Telemetry, color = Neon.Blue, softWrap = false) }
+                            e.sets.forEach {
+                                val prefix = if (it.type.letter.isEmpty()) "" else "${it.type.letter} "
+                                Text("$prefix${kgText(it.kg)} × ${it.reps}", style = Telemetry, color = Neon.Blue, softWrap = false)
+                            }
                         }
                     }
                 }
@@ -205,7 +226,7 @@ private fun RecordDialog(vm: AolonViewModel, id: String, close: () -> Unit) {
                 if (r == null) Text("No finished sets yet.", color = Neon.Muted)
                 else {
                     Text("Estimated 1RM per workout", color = Neon.Muted, style = MaterialTheme.typography.labelMedium)
-                    if (r.series.size >= 2) TrendLine(r.series.takeLast(12).map { it.second })
+                    if (r.series.size >= 2) TrendLine(r.series.takeLast(12).map { it.second }, "Estimated 1RM trend chart")
                     Text(kg(round1(r.series.last().second)), style = Telemetry.copy(fontSize = 32.sp), color = Neon.Purple)
                     Row(Modifier.fillMaxWidth()) {
                         Figure("Best 1RM", kg(round1(r.bestE1rm)), Modifier.weight(1f))

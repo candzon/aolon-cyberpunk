@@ -26,6 +26,8 @@ object Ute {
         0xA3, now.year shr 8, now.year and 0xff, now.monthValue, now.dayOfMonth, now.hour, now.minute, now.second,
     )
     fun syncSteps() = bytes(0xB2, 0xFA)
+    /** Sleep sync: EC 01 on watches with the Cywee sleep algorithm, else 31 01. The SDK no longer parses B3 FA replies. */
+    fun syncSleep(cywee: Boolean) = if (cywee) bytes(0xEC, 0x01) else bytes(0x31, 0x01)
     fun heartRate(start: Boolean) = bytes(0xE5, if (start) 0x11 else 0x00)
     fun oxygen(start: Boolean) = bytes(0x34, if (start) 0x11 else 0x00)
     fun bloodPressure(start: Boolean) = bytes(0xC7, if (start) 0x11 else 0x00)
@@ -67,6 +69,20 @@ object Ute {
             // Both share: [YYYY][MM][DD][HH][steps u16] then activity minutes we do not use yet.
             0xB1 -> if (u.size >= 8) stepHour(u) else null
             0xB2 -> if (u.size >= 8) stepHour(u) else WatchEvent.StepSyncDone
+            // 31 01 [YYYY][MM][DD] opens a night, 31 02 ends the sync; 31 AC is the sleep alarm, ignored.
+            0x31 -> when {
+                u.size >= 6 && u[1] == 0x01 -> runCatching { LocalDate.of((u[2] shl 8) or u[3], u[4], u[5]) }.getOrNull()?.let(WatchEvent::SleepNight)
+                u.size >= 2 && u[1] == 0x02 -> WatchEvent.SleepSyncDone
+                else -> null
+            }
+            0x32 -> WatchEvent.SleepData(data.copyOfRange(1, data.size))
+            // Cywee framing: EC 01 header as 31 01, EC 02 data after two bytes, EC 03 ends the sync.
+            0xEC -> when {
+                u.size >= 6 && u[1] == 0x01 -> runCatching { LocalDate.of((u[2] shl 8) or u[3], u[4], u[5]) }.getOrNull()?.let(WatchEvent::SleepNight)
+                u.size >= 2 && u[1] == 0x02 -> WatchEvent.SleepData(data.copyOfRange(2, data.size))
+                u.size >= 2 && u[1] == 0x03 -> WatchEvent.SleepSyncDone
+                else -> null
+            }
             0xE5 -> when {
                 u.size == 2 && u[1] == 0x11 -> WatchEvent.Measuring(Metric.HeartRate, true)
                 u.size == 2 && u[1] == 0x00 -> WatchEvent.Measuring(Metric.HeartRate, false)
@@ -90,11 +106,19 @@ object Ute {
         }
     }
 
+    /** 20-byte bitmap read from 34f1 holding function lists 8..13; list 8 is the last three bytes. */
+    fun moreFeatures(data: ByteArray): WatchEvent.MoreFeatures? {
+        if (data.size != 20) return null
+        val list8 = (0..2).fold(0) { acc, i -> (acc shl 8) or (data[17 + i].toInt() and 0xff) }
+        return WatchEvent.MoreFeatures(cyweeSleep = list8 and 0x20 != 0)
+    }
+
     /** 20-byte bitmap read from 33f1; function list 1 is the last three bytes, big-endian. */
     fun features(data: ByteArray): WatchEvent.Features? {
         if (data.size != 20) return null
-        val list1 = (0..2).fold(0) { acc, i -> (acc shl 8) or (data[17 + i].toInt() and 0xff) }
-        return WatchEvent.Features(bloodPressure = list1 and 0x100000 != 0)
+        fun list(from: Int) = (0..2).fold(0) { acc, i -> (acc shl 8) or (data[from + i].toInt() and 0xff) }
+        // List 4 sits at bytes 8..10; its 0x40000 bit selects the 31 01 sleep sync.
+        return WatchEvent.Features(bloodPressure = list(17) and 0x100000 != 0, sleep = list(8) and 0x40000 != 0)
     }
 
     private fun stepHour(u: IntArray): WatchEvent? {
@@ -120,10 +144,14 @@ enum class Metric { HeartRate, Oxygen, BloodPressure }
 sealed interface WatchEvent {
     data class Battery(val percent: Int, val charging: Boolean?) : WatchEvent
     data class Firmware(val version: String) : WatchEvent
-    data class Features(val bloodPressure: Boolean) : WatchEvent
+    data class Features(val bloodPressure: Boolean, val sleep: Boolean) : WatchEvent
+    data class MoreFeatures(val cyweeSleep: Boolean) : WatchEvent
     data object TimeSynced : WatchEvent
     data class StepHour(val date: LocalDate, val hour: Int, val steps: Int) : WatchEvent
     data object StepSyncDone : WatchEvent
+    data class SleepNight(val date: LocalDate) : WatchEvent
+    class SleepData(val bytes: ByteArray) : WatchEvent
+    data object SleepSyncDone : WatchEvent
     data class Measuring(val metric: Metric, val active: Boolean) : WatchEvent
     data class HeartRate(val bpm: Int) : WatchEvent
     /** Reply to a C5 message packet: FD shown, FF resend from the start, anything else next packet. */

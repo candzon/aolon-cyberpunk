@@ -85,10 +85,11 @@ class GymLog(private val store: RecordStore) {
     fun removeExercise(index: Int) = edit { it.copy(entries = it.entries.filterIndexed { i, _ -> i != index }) }
 
     fun addSet(exercise: Int) = editSets(exercise) { sets ->
-        sets + (sets.lastOrNull()?.copy(done = false) ?: GymSet(0.0, 0))
+        sets + (sets.lastOrNull()?.copy(done = false, type = SetType.Normal) ?: GymSet(0.0, 0))
     }
 
     fun updateSet(exercise: Int, set: Int, value: GymSet) = editSets(exercise) { sets -> sets.mapIndexed { i, s -> if (i == set) value else s } }
+    fun cycleType(exercise: Int, set: Int) = editSets(exercise) { sets -> sets.mapIndexed { i, s -> if (i == set) s.copy(type = s.type.next()) else s } }
     fun removeSet(exercise: Int, set: Int) = editSets(exercise) { sets -> sets.filterIndexed { i, _ -> i != set } }
 
     /** Ticking a set starts the rest countdown; unticking leaves the timer alone. */
@@ -193,8 +194,14 @@ class GymLog(private val store: RecordStore) {
         "startedAt" to w.startedAt,
         "endedAt" to w.endedAt,
         "entries" to w.entries.map { e ->
+            // Normal sets omit "type" so older workouts and new ones share one shape.
             mapOf("exerciseId" to e.exerciseId, "sets" to e.sets.map { s ->
-                if (withDone) mapOf("kg" to s.kg, "reps" to s.reps, "done" to s.done) else mapOf("kg" to s.kg, "reps" to s.reps)
+                buildMap {
+                    put("kg", s.kg)
+                    put("reps", s.reps)
+                    if (withDone) put("done", s.done)
+                    if (s.type != SetType.Normal) put("type", s.type.name)
+                }
             })
         },
     )
@@ -213,6 +220,7 @@ class GymLog(private val store: RecordStore) {
                         kg = (s.child("kg").value as? Number)?.toDouble() ?: 0.0,
                         reps = (s.child("reps").value as? Number)?.toInt() ?: 0,
                         done = s.child("done").getValue(Boolean::class.java) ?: true,
+                        type = SetType.entries.firstOrNull { it.name == s.str("type") } ?: SetType.Normal,
                     )
                 })
             },

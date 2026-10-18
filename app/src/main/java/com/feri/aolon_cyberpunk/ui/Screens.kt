@@ -104,7 +104,7 @@ fun HealthScreen(vm: AolonViewModel, goDevice: () -> Unit) {
                             when {
                                 state == LinkState.Connecting -> "Connecting to the watch…"
                                 !online -> "Watch offline. Showing the last synced data."
-                                else -> "Pull down to sync steps from the watch."
+                                else -> "Pull down to sync steps and sleep from the watch."
                             },
                             color = Neon.Soft,
                             style = MaterialTheme.typography.bodySmall,
@@ -113,6 +113,7 @@ fun HealthScreen(vm: AolonViewModel, goDevice: () -> Unit) {
                 }
             }
         }
+        item { SleepCard(vm) }
         item { VitalsCard(vm, online) }
         item {
             DayHistory(vm, day, first, today) { dayEpoch = it.toEpochDay() }

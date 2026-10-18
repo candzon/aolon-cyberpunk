@@ -5,7 +5,17 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 data class Exercise(val id: String, val name: String, val muscle: String, val custom: Boolean = false)
-data class GymSet(val kg: Double, val reps: Int, val done: Boolean = false)
+
+/** Lyfta's set types; warm-ups stay out of volume, records and recovery. */
+enum class SetType(val letter: String, val label: String) {
+    Normal("", "normal"), WarmUp("W", "warm-up"), Drop("D", "drop set"), Failure("F", "failure");
+
+    fun next() = entries[(ordinal + 1) % entries.size]
+}
+
+data class GymSet(val kg: Double, val reps: Int, val done: Boolean = false, val type: SetType = SetType.Normal) {
+    val working get() = type != SetType.WarmUp
+}
 data class ExerciseLog(val exerciseId: String, val sets: List<GymSet>)
 data class Routine(val id: String, val name: String, val exercises: List<String>)
 
@@ -32,8 +42,8 @@ class Records(
 /** Epley estimate; a single rep is the 1RM itself. */
 fun e1rm(kg: Double, reps: Int): Double = if (reps <= 1) kg else kg * (1 + reps / 30.0)
 
-/** Total kg moved in completed sets only. */
-fun volume(workout: GymWorkout): Double = workout.entries.sumOf { e -> e.sets.filter { it.done }.sumOf { it.kg * it.reps } }
+/** Total kg moved in completed working sets. */
+fun volume(workout: GymWorkout): Double = workout.entries.sumOf { e -> e.sets.filter { it.done && it.working }.sumOf { it.kg * it.reps } }
 
 /** Completed sets of [exerciseId] from the most recent finished workout that contains it. */
 fun previousSets(history: List<GymWorkout>, exerciseId: String): List<GymSet> =
@@ -43,7 +53,7 @@ fun previousSets(history: List<GymWorkout>, exerciseId: String): List<GymSet> =
 
 fun records(history: List<GymWorkout>, exerciseId: String): Records? {
     val sessions = history.filter { it.endedAt != null }.sortedBy { it.startedAt }.mapNotNull { w ->
-        val sets = w.entries.filter { it.exerciseId == exerciseId }.flatMap { it.sets }.filter { it.done && it.reps > 0 }
+        val sets = w.entries.filter { it.exerciseId == exerciseId }.flatMap { it.sets }.filter { it.done && it.working && it.reps > 0 }
         if (sets.isEmpty()) null else w.startedAt to sets
     }
     if (sessions.isEmpty()) return null
@@ -55,6 +65,14 @@ fun records(history: List<GymWorkout>, exerciseId: String): Records? {
         series = sessions.map { (at, sets) -> at to sets.maxOf { e1rm(it.kg, it.reps) } },
     )
 }
+
+/** Exercises in [workout] that beat every earlier finished session on estimated 1RM or heaviest set. A first session sets no record. */
+fun newRecords(earlier: List<GymWorkout>, workout: GymWorkout): List<String> =
+    workout.entries.map { it.exerciseId }.distinct().filter { id ->
+        val before = records(earlier, id) ?: return@filter false
+        val now = records(listOf(workout), id) ?: return@filter false
+        now.bestE1rm > before.bestE1rm || now.heaviestKg > before.heaviestKg
+    }
 
 /** "60" for whole kilos, "62.5" otherwise. */
 fun kgText(kg: Double): String = if (kg % 1.0 == 0.0) kg.toInt().toString() else "%.1f".format(java.util.Locale.US, kg).trimEnd('0').trimEnd('.')

@@ -18,15 +18,15 @@ It talks to the watch directly over Bluetooth. The watch uses the UTE protocol (
 
 ## What it does
 
-Health shows steps by hour, heart rate and SpO2 measured on demand, and syncs the watch clock. My watch has no blood pressure sensor, so that row disappears whenever the watch reports it has none.
+Health shows steps by hour, heart rate and SpO2 measured on demand, and syncs the watch clock. Sleep comes from the watch after each step sync: time asleep, when you went to bed and woke up, how often you woke, and how the night split into deep, light and REM sleep, drawn as a chart of the whole night. My watch has no blood pressure sensor, so that row disappears whenever the watch reports it has none.
 
-Sport has two tabs. Gym is a set-by-set log with routines, a rest timer that vibrates, personal records (estimated 1RM with the Epley formula), around 58 built-in exercises plus your own, and an import from Lyfta if you already log there. Any past workout can be repeated or saved as a routine.
+Sport has two tabs. Gym is a set-by-set log with routines, a rest timer that vibrates, personal records (estimated 1RM with the Epley formula), around 58 built-in exercises plus your own, and an import from Lyfta if you already log there. Any past workout can be repeated or saved as a routine. Sets can be marked as warm-up, drop set or failure, and warm-ups stay out of volume and records. Finishing a workout tells you which lifts hit a new record. A recovery card estimates how ready each muscle group is, using the same 7-day model Lyfta uses.
 
 Cardio records walks, runs and rides with the phone's GPS: a route on an OpenStreetMap map, distance, moving time, pace, per-km splits, and auto-pause when you stop. An indoor Workout mode records time and heart rate only. Heart rate comes from the watch during every activity.
 
 Heart rate zones follow the common 220 minus age estimate with five bands (50 to 100 percent of max, as published by the Cleveland Clinic). Pick a target zone before you start and the app tells you, on the phone and on the watch, when you drift above or below it. After the activity you get time spent in each zone.
 
-Body has a body fat calculator (the U.S. Navy method), weight and body fat tracking over time, and calories burned.
+Body works like a small fatsecret. The food diary groups what you eat into breakfast, lunch, dinner and snacks, with optional protein, carbs and fat, and anything you ate before is one tap away. A daily calorie target comes from your age, height, weight, activity level and goal (the Institute of Medicine energy estimate, minus or plus 500 kcal a day per 0.5 kg a week). You can weigh in, set a goal weight and see how much you have lost and how far is left. The body fat calculator (the U.S. Navy method) and an estimate of calories burned are still there.
 
 Watch notifications forward the phone notifications you choose, app by app, to the watch screen. Apps the watch knows (WhatsApp, Telegram, Gmail, Instagram and about 25 others) show with their own icon; everything else shows as Others with the app name in front.
 
@@ -82,7 +82,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 The release build is signed with the debug key too. I did that on purpose so the one SHA-1 you registered works for both. If you ever want to publish the app, create a real release keystore and add its SHA-1 to Firebase as well.
 
-To run the tests, use `./gradlew testDebugUnitTest`. They focus on the parts that are easiest to get wrong: body fat maths, gym records, the Lyfta import, GPS filtering and splits, heart rate zones, and the packets sent to the watch.
+To run the tests, use `./gradlew testDebugUnitTest`. They focus on the parts that are easiest to get wrong: body fat maths, calorie targets, sleep packets, gym records, the Lyfta import, GPS filtering and splits, heart rate zones, and the packets sent to the watch.
 
 ## Connecting Lyfta (optional)
 
