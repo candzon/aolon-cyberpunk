@@ -32,6 +32,14 @@ Watch notifications forward the phone notifications you choose, app by app, to t
 
 Deleting anything is a soft delete with an Undo button, so a mis-tap never loses data.
 
+## Supported watches
+
+The app only works with watches that speak the UTE protocol. In practice that means Aolon watches and the ones that pair with the GloryFit app, since they are built on the same SDK. When it connects, the app looks for the UTE Bluetooth service (`55ff`). If a watch doesn't have it, the app stops there and says so in the Bluetooth log.
+
+I've only tested it on my own Aolon Tetra S5. Other UTE watches should work, but firmware differs from model to model, so some things may not. The app reads each watch's feature list and adjusts to it. Blood pressure is hidden if there's no sensor, and sleep uses whichever sync method the watch reports.
+
+Watches from other makers won't work. Each brand has its own protocol. That includes Xiaomi and Amazfit (Zepp), Huawei, Samsung Galaxy Watch, Apple Watch, Garmin, Fitbit, Wear OS, and budget watches that use other apps such as Da Fit, FitCloudPro or H Band.
+
 ## Things to know
 
 - The watch only accepts one connection. Close the official Aolon app before using this one.
